@@ -9,19 +9,18 @@ Baseado em patterns do [reprompter](https://github.com/AytuncYildizli/reprompter
 ## Features
 
 - **Router**: Decide execution mode (single/parallel/sequential/ACP)
-- **Contract Builder**: Transforma rough task em structured brief
+- **Contract Builder**: Transform rough task into structured brief
 - **Context Builder**: Build layered context (contract + facts + references + artifacts)
 - **Output Checker**: Validate agent output quality
 
 ## Quick Start
 
 ```javascript
-const { orchestrate } = require('./orchestrator-lite');
+const { orchestrate } = require('./index');
 
 const result = orchestrate('build a REST API with authentication', {
-  projectPath: '/path/to/project',
-  project: 'myproject',
-  stack: ['node', 'typescript']
+  projectPath: './myproject',
+  project: 'myproject'
 });
 
 console.log(result.brief);
@@ -40,21 +39,23 @@ npm install
 
 ### Single Agent Task
 ```javascript
-const result = orchestrate('fix the typo in header.tsx');
+const result = orchestrate('fix the login bug in auth.ts', {
+  projectPath: './myproject'
+});
 // result.execution.mode = 'single'
 ```
 
 ### Multi-Agent Task
 ```javascript
 const result = orchestrate('build frontend + backend + tests for user dashboard', {
-  projectPath: '/path/to/project'
+  projectPath: './myproject'
 });
 // result.execution.mode = 'parallel'
 ```
 
 ### Sequential Pipeline
 ```javascript
-const result = orchestrate('fetch data from API, process it, then deploy');
+const result = orchestrate('fetch data from API, process it, then save to database');
 // result.execution.mode = 'sequential'
 ```
 
@@ -62,83 +63,74 @@ const result = orchestrate('fetch data from API, process it, then deploy');
 
 ```javascript
 const { orchestrate } = require('./orchestrator-lite');
-const { spawn } = require('openclaw');
+const { sessions_spawn } = require('openclaw');
 
 async function runTask(task, options) {
   const orchestration = orchestrate(task, options);
   
   if (orchestration.execution.mode === 'single') {
-    return spawn({
+    return sessions_spawn({
       task: orchestration.brief,
-      runtime: 'acp'
+      runtime: 'acp',
+      agentId: 'claude'
     });
   } else if (orchestration.execution.mode === 'parallel') {
-    // Spawn multiple agents in parallel
     const agents = orchestration.routing.domains.map(domain => ({
-      task: `Handle ${domain}: ${task}`,
-      runtime: 'acp'
+      runtime: 'acp',
+      agentId: 'claude',
+      task: `Handle ${domain} part: ${task}`
     }));
     
-    return Promise.all(agents.map(a => spawn(a)));
+    return Promise.all(agents.map(a => sessions_spawn(a)));
   }
 }
 ```
 
-## Architecture
-
-```
-orchestrator-lite/
-├── index.js              # Main entry point
-├── router.js             # Decide execution mode
-├── contract-builder.js   # Build structured brief
-├── context-builder.js    # Build layered context
-├── output-check.js       # Validate output quality
-└── test.js              # Tests
-```
-
 ## Design Principles
-
-1. **Simplicity first** - Cada módulo <200 linhas
-2. **Practical** - Feito para uso real, não demonstração
-3. **OpenClaw-native** - Integra com tools existentes
-4. **No overhead** - Sem flywheel, telemetry pesada, feature flags
+1. **Simplicity first** - Each module is <200 lines
+2. **Practical** - Built for real use, not demonstration
+3. **OpenClaw-native** - Integrates with existing tools
+4. **No overhead** - No flywheel, heavy telemetry, feature flags
 
 ## What we copied from reprompter
-
 - Intent routing logic
 - Task contract structure
 - Layered context concept
 - Output validation approach
 
 ## What we ignored from reprompter
-
 - Flywheel engine (too complex)
 - Heavy telemetry (premature optimization)
 - Feature flags (unnecessary complexity)
 - Benchmark harness (not needed for daily use)
 
-## API
+## API Reference
 
-### `orchestrate(rawTask, options)`
+### orchestrate(rawTask, options)
+
+Transforms a rough task description into a structured execution plan.
 
 **Parameters:**
-- `rawTask` (string): Raw task description
+- `rawTask` (string): The task description
 - `options` (object):
-  - `projectPath` (string): Path to project
+  - `projectPath` (string): Path to project directory
   - `project` (string): Project name
-  - `stack` (array): Tech stack
-  - `forceMultiAgent` (boolean): Force multi-agent mode
-  - `forceSingle` (boolean): Force single-agent mode
+  - `stack` (array): Technology stack
+  - `files` (array): Relevant files
+  - `constraints` (array): Task constraints
+  - `requirements` (array): Task requirements
 
 **Returns:**
-- `routing`: Decision details
-- `contract`: Structured task
-- `context`: Layered context
-- `brief`: Ready-to-use brief
-- `execution`: Execution plan
-- `metadata`: Orchestration metadata
+- `routing` (object): Execution routing decision
+- `contract` (object): Structured task contract
+- `context` (object): Layered context
+- `brief` (string): Human-readable brief
+- `execution` (object): Execution plan
+- `metadata` (object): Orchestration metadata
 
-### `validate(output, contract)`
+### validate(output, contract)
+
+Validates agent output quality.
 
 **Parameters:**
 - `output` (string): Agent output to validate
@@ -147,9 +139,10 @@ orchestrator-lite/
 **Returns:**
 - `passed` (boolean): Whether output meets quality threshold
 - `score` (object): Quality scores
+- `issues` (array): Issues found
 - `recommendations` (array): Improvement suggestions
 
-## Examples in the Wild
+## Examples in the wild
 
 ### Tweet about orchestrator-lite
 ```
@@ -169,7 +162,6 @@ What would you add?
 ```
 
 ## Roadmap
-
 - [ ] Integration examples with popular AI tools
 - [ ] Brief templates library
 - [ ] Performance metrics
@@ -177,11 +169,9 @@ What would you add?
 - [ ] Web interface
 
 ## License
-
 MIT
 
 ## Contributing
-
 PRs welcome! Especially:
 - Bug fixes
 - Documentation improvements
