@@ -4,12 +4,25 @@
  *
  * Main entry point for orchestrator-lite
  * provides unified interface for task orchestration
+ *
+ * Modules:
+ * - router: Intent routing (single/parallel/sequential)
+ * - contract-builder: Task contract generation
+ * - context-builder: Layered context assembly
+ * - output-check: Output quality validation
+ * - circuit-breaker: Loop protection state machine (Ralph-inspired)
+ * - response-analyzer: Agent output pattern detection (Ralph-inspired)
+ * - exit-detector: Dual-condition exit gate (Ralph-inspired)
  */
 
+const path = require('path');
 const { routeIntent, countDistinctDomains } = require('./router');
 const { buildContract, generateBrief } = require('./contract-builder');
 const { buildContext } = require('./context-builder');
 const { checkOutput } = require('./output-check');
+const { CircuitBreaker, STATES } = require('./circuit-breaker');
+const { analyzeResponse, buildLoopContext, getQuestionCorrectionContext } = require('./response-analyzer');
+const { ExitDetector } = require('./exit-detector');
 
 /**
  * Main orchestration function
@@ -82,16 +95,93 @@ function validate(output, contract) {
   return checkOutput(output, contract);
 }
 
+/**
+ * Orchestrate with loop control (Ralph-inspired)
+ * For long-running autonomous tasks with circuit breaker + exit detection
+ *
+ * @param {string} rawTask - Task description
+ * @param {Object} options - Orchestration options
+ * @param {string} [options.projectPath] - Project directory path
+ * @param {Object} [options.circuitBreaker] - Circuit breaker config overrides
+ * @param {Object} [options.exitDetection] - Exit detector config overrides
+ * @returns {Object} Plan with .loop and .loopControl for autonomous execution
+ */
+function orchestrateLoop(rawTask, options = {}) {
+  const plan = orchestrate(rawTask, options);
+
+  const cb = new CircuitBreaker({
+    stateFile: path.join(options.projectPath || '.', '.orchestrator/circuit-breaker-state.json'),
+    historyFile: path.join(options.projectPath || '.', '.orchestrator/circuit-breaker-history.json'),
+    ...options.circuitBreaker
+  });
+
+  const exitDetector = new ExitDetector(options.exitDetection);
+
+  return {
+    ...plan,
+    loop: {
+      circuitBreaker: cb,
+      exitDetector,
+      analyzeResponse,
+      buildLoopContext
+    },
+    loopControl: {
+      /**
+       * Call after each agent iteration
+       * @param {Object} iterationResult - { text, filesChanged, loopNumber, outputLength }
+       * @returns {{ continue: boolean, exitReason: string|null, cbState: string, analysis: Object }}
+       */
+      next(iterationResult) {
+        // Analyze response
+        const analysis = analyzeResponse(iterationResult.text, {
+          filesChanged: iterationResult.filesChanged,
+          loopNumber: iterationResult.loopNumber,
+          outputLength: iterationResult.outputLength
+        });
+
+        // Record in circuit breaker
+        const canContinue = cb.record({
+          loopNumber: iterationResult.loopNumber,
+          filesChanged: iterationResult.filesChanged,
+          hasErrors: analysis.isStuck,
+          outputLength: analysis.outputLength,
+          hasProgress: analysis.hasProgress,
+          hasCompletionSignal: analysis.hasCompletionSignal
+        });
+
+        // Update exit detector
+        exitDetector.update(analysis);
+        const exit = exitDetector.shouldExit(analysis.exitSignal);
+
+        return {
+          continue: canContinue && !exit.shouldExit,
+          exitReason: exit.reason,
+          cbState: cb.getState().state,
+          analysis
+        };
+      }
+    }
+  };
+}
+
 // Export main functions
 module.exports = {
   orchestrate,
+  orchestrateLoop,
   validate,
   routeIntent,
   countDistinctDomains,
   buildContract,
   generateBrief,
   buildContext,
-  checkOutput
+  checkOutput,
+  // Ralph-inspired modules
+  CircuitBreaker,
+  STATES,
+  analyzeResponse,
+  buildLoopContext,
+  getQuestionCorrectionContext,
+  ExitDetector
 };
 
 if (require.main === module) {
